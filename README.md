@@ -107,4 +107,114 @@ This project analyzes the [Superstore Sales Dataset](https://www.kaggle.com/data
 6. **Do not deploy the sales forecast without further validation** — treat current ARIMA/Prophet results as directional signals, not production-grade predictions.
 
 ---
+# 📐 Model Evaluation Indicators —
+
+---
+
+## 1. CV_R² — Cross-Validation R²
+
+**What it is:**  
+The average R² score across all cross-validation folds, computed on the **training data only** (2014–2016).
+
+**What R² means:**  
+R² measures how much of the variance in `Profit` the model explains.  
+- R² = 1.0 → perfect predictions  
+- R² = 0.0 → model is no better than predicting the mean  
+- R² < 0 → model is worse than the mean (bad)
+
+**In our context:**  
+| Model | CV_R² |
+|---|---|
+| XGBoost | 0.728 |
+| RandomForest (Tuned) | 0.725 |
+| RandomForest (Base) | 0.712 |
+
+All three models explain ~71–73% of profit variance during cross-validation. The scores are close, meaning no model has a strong advantage on training data alone. CV_R² tells us how well the model **learns** — but not how well it **generalizes**.
+
+---
+
+## 2. CV_RMSE — Cross-Validation Root Mean Squared Error
+
+**What it is:**  
+The average prediction error (in dollars) across CV folds, still on **training data**.
+
+**What RMSE means:**  
+RMSE is the square root of the average squared difference between predicted and actual profit.  
+- Same unit as the target → directly interpretable as **"on average, the model is off by X dollars"**  
+- Penalizes **large errors** more heavily than small ones (because of the square)
+
+**In our context:**  
+| Model | CV_RMSE |
+|---|---|
+| RandomForest (Base) | 39.31 $ |
+| XGBoost | 38.20 $ |
+| RandomForest (Tuned) | — |
+
+During cross-validation, models make an average error of ~38–39 $ per order. This is relatively high, which is expected — profit in retail is noisy and heavily influenced by discounts and sub-category, making it hard to predict perfectly. XGBoost has a slightly lower CV_RMSE, suggesting it handles the training data more efficiently.
+
+> ⚠️ CV_RMSE for RandomForest (Tuned) is missing (`—`) because `GridSearchCV` was configured to optimize R² only, so RMSE was not collected during tuning.
+
+---
+
+## 3. Test_R² — Test Set R²
+
+**What it is:**  
+R² computed on the **held-out test set (year 2017)** — data the model has never seen during training.
+
+**Why it matters more than CV_R²:**  
+This is the **honest evaluation**. It tells us whether the model truly generalizes to new data, or if it just memorized patterns from the training period.
+
+**In our context:**  
+| Model | Test_R² |
+|---|---|
+| **XGBoost** | **0.872** ✅ |
+| RandomForest (Base) | 0.857 |
+| RandomForest (Tuned) | 0.806 |
+
+XGBoost explains **87.2% of profit variance** on unseen 2017 orders — a strong result for a noisy retail target. Notice that RandomForest (Tuned) actually **drops** from CV to Test (0.725 → 0.806), while Base RF holds up better. This suggests the tuning **overfitted the CV folds** and did not improve real-world generalization.
+
+---
+
+## 4. Test_RMSE — Test Set Root Mean Squared Error
+
+**What it is:**  
+The average prediction error in **dollars** on the 2017 test set.
+
+**Why it matters:**  
+This is the metric that translates directly into **business impact**. An RMSE of 26$ means that on average, the model's profit prediction deviates by 26$ per order.
+
+**In our context:**  
+| Model | Test_RMSE |
+|---|---|
+| **XGBoost** | **26.37 $** ✅ |
+| RandomForest (Base) | 27.84 $ |
+| RandomForest (Tuned) | 32.49 $ |
+
+XGBoost makes the smallest average error. The gap between XGBoost (26.37$) and Tuned RF (32.49$) is meaningful — the tuned model is **6$ worse per order**, confirming that tuning hurt generalization here.
+
+---
+
+## 🔑 Summary Table
+
+| Indicator | Computed On | Tells Us | Higher is better? |
+|---|---|---|---|
+| **CV_R²** | Training folds | How well the model learns | ✅ Yes |
+| **CV_RMSE** | Training folds | Average training error ($) | ❌ No (lower = better) |
+| **Test_R²** | Held-out 2017 data | How well the model generalizes | ✅ Yes |
+| **Test_RMSE** | Held-out 2017 data | Real-world prediction error ($) | ❌ No (lower = better) |
+
+---
+
+## ⚖️ How to Read Them Together
+
+```
+CV_R² ≈ Test_R²  →  model generalizes well, no overfitting
+CV_R² >> Test_R² →  model overfitted the training period (e.g. RandomForest Tuned)
+
+Low CV_RMSE + Low Test_RMSE  →  consistently accurate
+Low CV_RMSE + High Test_RMSE →  good on paper, poor in practice
+```
+
+**In our project:** XGBoost is the best choice because it achieves the highest Test_R² (0.872) and lowest Test_RMSE (26.37$), meaning it is both accurate and generalizes well to new orders — making it reliable as a **profit screening tool** for business decisions.
+
 
